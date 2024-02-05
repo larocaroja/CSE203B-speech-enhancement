@@ -1,4 +1,4 @@
-# NMF-based Speech Enhancement for WI24 CSE 203B group project
+# NMF-based Speech Enhancement for WI24 CSE 203
 
 ## Introduction
 
