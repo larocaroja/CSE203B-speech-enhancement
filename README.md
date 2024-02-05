@@ -1,4 +1,4 @@
-# NMF-based Speech Enhancement for WI24 CSE 203
+# NMF-based Speech Enhancement for WI24 CSE 203B
 
 ## Introduction
 
