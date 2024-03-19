@@ -97,8 +97,14 @@ class SpeechEnhancement:
         """
         Denoise a signal using the learned dictionary D and Lasso for sparse coding.
         """
+        noisy_signal = np.array([self.mel_spectrogram(waveform)[0].T for waveform in noisy_signal])
+        b, t,f = noisy_signal.shape
+        noisy_signal = noisy_signal.reshape(f, -1)
+        print(noisy_signal.shape)
         sparse_code = self.lasso_sparse_coding(self.D, noisy_signal, self.config.alpha_val)
-        denoised_signal = np.dot(self.D, sparse_code)
+        denoised_signal = np.dot(self.D, sparse_code.T)
+        print(denoised_signal.shape)
+        denoised_signal = denoised_signal.reshape(b, -1, f)
 
         return denoised_signal
     
@@ -163,16 +169,15 @@ if __name__ == "__main__":
     clean_speech_val = load_Librispeech_data(config.dataset_dir, train = False)
     print("Shape of training samples:", clean_speech_train.shape)
     print("Shape of validation samples:", clean_speech_val.shape)
-    noisy_speech_train = generate_synthetic_data(clean_speech_train, config.dataset_dir)
-    print("Shape of noisy training samples:", noisy_speech_train.shape)
+    noisy_speech_val = generate_synthetic_data(clean_speech_val, config.dataset_dir)
+    print("Shape of noisy training samples:", noisy_speech_val.shape)
 
 
     speech_enh = SpeechEnhancement(config)
     speech_enh.dictionary_learning(clean_speech_train)
 
     # Denoise a sample noisy signal using the learned dictionary
-    sample_noisy_signal = noisy_speech_train
-    denoised_signal = speech_enh.denoise_signal(sample_noisy_signal, config.alpha_val)
+    denoised_signal = speech_enh.denoise_signal(noisy_speech_val)
     
-    print("Sample noisy signal (first 10 samples):", sample_noisy_signal[:10])
+    print("Sample noisy signal (first 10 samples):", noisy_speech_val[:10])
     print("Denoised signal (first 10 samples):", denoised_signal[:10])
