@@ -264,7 +264,7 @@ if __name__ == "__main__":
     print("Denoised signal (first sample):", denoised_signal[0])
 
     # Visualize the mel spectrogram
-    # speech_enh.visualize_spectrogram(clean_speech_val[:2], noisy_speech_val[:2])
+    speech_enh.visualize_spectrogram(clean_speech_val[:2], noisy_speech_val[:2])
 
     # Evaluate the denoised signal using PESQ
     pesq_dict= speech_enh.evaluate()
