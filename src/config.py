@@ -2,9 +2,9 @@
 dataset_dir = '/Users/hongseokoh/Documents/GitHub/CSE203B-speech-enhancement/data/'
 training_dataset_size = 1000
 n_atoms = 512
-alpha_val = 0.01
-num_lasso_iterations = 10
-num_ksvd_iterations = 1
+alpha_val = 0.001
+num_lasso_iterations = 10000
+num_ksvd_iterations = 3
 SNR_dB = 0
 noise_type = 'white' # ['white', 'pink', 'brown', 'grey', 'blue', 'purple']
 

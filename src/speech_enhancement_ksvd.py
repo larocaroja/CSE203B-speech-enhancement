@@ -1,9 +1,12 @@
+import sys
 import os
 
 from glob import glob
 import numpy as np
 from sklearn.linear_model import Lasso
+from sklearn.decomposition import DictionaryLearning, NMF
 import librosa
+import librosa.display
 import time
 import warnings
 # warnings.filterwarnings("ignore")
@@ -14,27 +17,6 @@ import warnings
 # import torchaudio.functional as F
 
 import config
-
-def load_Librispeech_data(dataset_dir, train = True):
-    """
-    Load the Librispeech dataset for speech enhancement.
-    """
-    # Load the Librispeech dataset
-    dataset_dir = os.path.join(dataset_dir, f"LibriSpeech_{int(config.sample_rate//1000)}kHz_{int(config.duration)}s", ['val', 'train'][train])
-    dataset_files = glob(dataset_dir + '/*.wav')
-    assert len(dataset_files) > 0, f"No audio files found in the dataset directory. ({dataset_dir})"
-    
-    audio_data = []
-
-    for file in dataset_files[:50]:
-        waveform, sample_rate = librosa.load(file, sr = None, mono = True)
-        assert sample_rate == config.sample_rate, f"Sample rate mismatch. Expected {config.sample_rate} but got {sample_rate}."
-
-        audio_data.append(waveform)
-
-    # audio_data = torch.vstack(audio_data, dim=1).numpy()
-
-    return np.asarray(audio_data)
 
 
 class SpeechEnhancement:
@@ -48,10 +30,18 @@ class SpeechEnhancement:
         b : input signal (n_mels,)
         alpha_val : regularization parameter
         """
-        lasso = Lasso(alpha=alpha_val, fit_intercept=False, max_iter=config.num_lasso_iterations, tol=1e-3)
+        lasso = Lasso(alpha=alpha_val, fit_intercept=False, max_iter=config.num_lasso_iterations, tol=1e-4, positive=True)
         lasso.fit(D, b)
+        # print(D.shape, b.shape)
+        # print(lasso.coef_.shape)
+        # print(lasso.coef_)
+        # print(lasso.dual_gap_)
+        # print(b)
+        # print(D @ lasso.coef_)
         return lasso.coef_
 
+        # sys.exit()
+    
     def k_svd(self, B):
         """
         K-SVD algorithm for dictionary learning, using Lasso for sparse coding.
@@ -65,11 +55,11 @@ class SpeechEnhancement:
 
         for iteration in range(self.config.num_ksvd_iterations):
             # Sparse coding step with Lasso
-            # for i in range(n):
-            #     X[:, i] = self.lasso_sparse_coding(D, B[:, i], self.config.alpha_val)
+            for i in range(n):
+                X[:, i] = self.lasso_sparse_coding(D, B[:, i], self.config.alpha_val)
             # print(D.shape, B.shape)
-            X = self.lasso_sparse_coding(D, B, self.config.alpha_val)
-            X = X.T
+            # X = self.lasso_sparse_coding(D, B, self.config.alpha_val)
+            # X = X.T
             # print(X.shape)
             print(f"Iteration {iteration+1}/{self.config.num_ksvd_iterations} complete.")
 
@@ -93,6 +83,23 @@ class SpeechEnhancement:
 
         return D, X
 
+    def nmf(self, B):
+        """
+        Non-negative matrix factorization (NMF) algorithm for dictionary learning.
+        """
+        nmf = NMF(n_components=self.config.n_atoms, init='random', random_state=0)
+        W = nmf.fit_transform(B)
+        H = nmf.components_
+        return W, H
+    
+    def dictionary_learning(self,B):
+        """
+        Dictionary learning using the sklearn DictionaryLearning class.
+        """
+        dict_learning = DictionaryLearning(n_components=self.config.n_atoms, alpha=self.config.alpha_val, max_iter=self.config.num_ksvd_iterations, fit_algorithm='lars', transform_algorithm='lasso_lars', transform_alpha=self.config.alpha_val, n_jobs=-1)
+        D = dict_learning.fit_transform(B)
+        return D
+    
     def denoise_signal(self, noisy_signal):
         """
         Denoise a signal using the learned dictionary D and Lasso for sparse coding.
@@ -100,10 +107,14 @@ class SpeechEnhancement:
         noisy_signal = np.array([self.mel_spectrogram(waveform)[0].T for waveform in noisy_signal])
         b, t,f = noisy_signal.shape
         noisy_signal = noisy_signal.reshape(f, -1)
-        print(noisy_signal.shape)
-        sparse_code = self.lasso_sparse_coding(self.D, noisy_signal, self.config.alpha_val)
-        denoised_signal = np.dot(self.D, sparse_code.T)
-        print(denoised_signal.shape)
+        # print(noisy_signal.shape)
+        # sparse_code = self.lasso_sparse_coding(self.D, noisy_signal, self.config.alpha_val)
+        # denoised_signal = np.zeros(noisy_signal.shape)
+        sparse_code = np.zeros((self.config.n_atoms, noisy_signal.shape[-1]))
+        for i in range(sparse_code.shape[-1]):
+                sparse_code[:, i] = self.lasso_sparse_coding(self.D, noisy_signal[:, i], self.config.alpha_val)
+        denoised_signal = np.dot(self.D, sparse_code)
+        # print(denoised_signal.shape)
         denoised_signal = denoised_signal.reshape(b, -1, f)
 
         return denoised_signal
@@ -115,29 +126,54 @@ class SpeechEnhancement:
         stft = librosa.stft(waveform, n_fft=self.config.n_fft, hop_length=self.config.hop_size)
         mag, phase = librosa.magphase(stft)
         mel_spectrogram = librosa.feature.melspectrogram(S=mag, sr=self.config.sample_rate, n_mels=self.config.n_mels, n_fft = self.config.n_fft, hop_length = self.config.hop_size)
-        log_mel_spectrogram = librosa.power_to_db(mel_spectrogram, ref=np.max)
+        # print(mel_spectrogram)
+        # log_mel_spectrogram = librosa.power_to_db(mel_spectrogram, ref=np.max)
 
-        return log_mel_spectrogram, phase
+        return mel_spectrogram, phase
     
-    def inverse_mel_spectrogram(self, log_mel_spectrogram, phase):
+    def inverse_mel_spectrogram(self, mel_spectrogram, phase):
         """
         Compute the inverse mel spectrogram of the waveform.
         """
         # y_pad = librosa.util.fix_length(y, size=n + n_fft // 2)
-        mel_spectrogram = librosa.db_to_power(log_mel_spectrogram)
+        # mel_spectrogram = librosa.db_to_power(log_mel_spectrogram)
         stft = librosa.feature.inverse.mel_to_stft(mel_spectrogram, sr = self.config.sample_rate, n_fft=self.config.n_fft, power=2)
         stft = stft * phase
         waveform = librosa.istft(stft, hop_length=self.config.hop_size)
 
         return waveform
     
-    def dictionary_learning(self, clean_speech):
+    def fit(self, clean_speech):
         """
         Learn the dictionary from clean speech signals.
         """
         B = np.array([self.mel_spectrogram(waveform)[0].T for waveform in clean_speech]) # (n_samples, n_frames, n_mels)
         B = B.reshape(B.shape[-1], -1) # (n_samples * n_frames, n_mels)
         self.D, X = self.k_svd(B) # (n_mels, n_atoms), (n_atoms, n_samples * n_frames)
+        print(self.D)
+
+
+def load_Librispeech_data(dataset_dir, train = True):
+    """
+    Load the Librispeech dataset for speech enhancement.
+    """
+    # Load the Librispeech dataset
+    dataset_dir = os.path.join(dataset_dir, f"LibriSpeech_{int(config.sample_rate//1000)}kHz_{int(config.duration)}s", ['val', 'train'][train])
+    dataset_files = glob(dataset_dir + '/*.wav')
+    assert len(dataset_files) > 0, f"No audio files found in the dataset directory. ({dataset_dir})"
+    
+    audio_data = []
+
+    for file in dataset_files[:50]:
+        waveform, sample_rate = librosa.load(file, sr = None, mono = True)
+        assert sample_rate == config.sample_rate, f"Sample rate mismatch. Expected {config.sample_rate} but got {sample_rate}."
+
+        audio_data.append(waveform)
+
+    # audio_data = torch.vstack(audio_data, dim=1).numpy()
+
+    return np.asarray(audio_data)
+
 
 def generate_synthetic_data(clean_speech, dataset_dir):
     """
@@ -159,7 +195,6 @@ def generate_synthetic_data(clean_speech, dataset_dir):
         noisy_speech.append(noisy_signal)
 
     return np.asarray(noisy_speech)
-    
 
 
 if __name__ == "__main__":
@@ -172,12 +207,13 @@ if __name__ == "__main__":
     noisy_speech_val = generate_synthetic_data(clean_speech_val, config.dataset_dir)
     print("Shape of noisy training samples:", noisy_speech_val.shape)
 
-
     speech_enh = SpeechEnhancement(config)
-    speech_enh.dictionary_learning(clean_speech_train)
+    speech_enh.fit(clean_speech_train)
 
     # Denoise a sample noisy signal using the learned dictionary
     denoised_signal = speech_enh.denoise_signal(noisy_speech_val)
+    print(denoised_signal.shape)
     
-    print("Sample noisy signal (first 10 samples):", noisy_speech_val[:10])
-    print("Denoised signal (first 10 samples):", denoised_signal[:10])
+    print("Sample clean signal (first sample):", speech_enh.mel_spectrogram(clean_speech_val[0])[0])
+    print("Sample noisy signal (first sample):", speech_enh.mel_spectrogram(noisy_speech_val[0])[0])
+    print("Denoised signal (first sample):", denoised_signal[0])
