@@ -9,6 +9,7 @@ import librosa
 import librosa.display
 import matplotlib.pyplot as plt
 from collections import defaultdict
+from tqdm import tqdm
 
 import config
 import pesq
@@ -48,13 +49,13 @@ class SpeechEnhancement:
         D = np.random.rand(m, self.config.n_atoms)
         X = np.zeros((self.config.n_atoms, n))
 
-        for iteration in range(self.config.num_ksvd_iterations):
+        for iteration in tqdm(range(self.config.num_ksvd_iterations)):
             # Sparse coding step with Lasso
-            for i in range(n):
-                X[:, i] = self.lasso_sparse_coding(D, B[:, i], self.config.alpha_val)
+            # for i in range(n):
+            #     X[:, i] = self.lasso_sparse_coding(D, B[:, i], self.config.alpha_val)
             # print(D.shape, B.shape)
-            # X = self.lasso_sparse_coding(D, B, self.config.alpha_val)
-            # X = X.T
+            X = self.lasso_sparse_coding(D, B, self.config.alpha_val)
+            X = X.T
             # print(X.shape)
             print(f"Iteration {iteration+1}/{self.config.num_ksvd_iterations} complete.")
 
@@ -162,7 +163,6 @@ class SpeechEnhancement:
             noisy_speech = np.expand_dims(noisy_speech, axis=0)
 
         fig, axes = plt.subplots(len(clean_speech.shape), 3, figsize=(16, 8))
-        print(clean_speech.shape[0])
         for i in range(clean_speech.shape[0]):
             mel_spectrogram_clean, _ = self.mel_spectrogram(clean_speech[i])
             mel_spectrogram_noisy, _ = self.mel_spectrogram(noisy_speech[i])
@@ -180,18 +180,20 @@ class SpeechEnhancement:
         plt.savefig('mel_spectrogram.png')
         plt.show()
 
-    def evaluate(self):
+    def evaluate(self, clean_speech_val):
         """
         Evaluate the denoised signal using PESQ.
         """
+        assert len(clean_speech_val) == len(self.denoised_mel_spectrogram), f"Number of clean speech samples ({len(clean_speech_val)}) does not match the number of denoised samples ({len(self.denoised_mel_spectrogram)})."
+
         # print(self.denoised_mel_spectrogram.shape, self.phase_noisy.shape)
         denoised_signal_inv = np.array([self.inverse_mel_spectrogram(mel_spectrogram, phase) for mel_spectrogram, phase in zip(self.denoised_mel_spectrogram, self.phase_noisy)])
         # print(self.clean_speech.shape, denoised_signal_inv.shape)
         pesq_dict = defaultdict(list)    
 
-        for i in range(len(self.clean_speech)):
-            pesq_score_wb = pesq.pesq(fs = self.config.sample_rate, ref = self.clean_speech[i], deg = denoised_signal_inv[i], mode = 'wb')
-            pesq_score_nb = pesq.pesq(fs = self.config.sample_rate, ref = self.clean_speech[i], deg = denoised_signal_inv[i], mode = 'nb')
+        for i in range(len(clean_speech_val)):
+            pesq_score_wb = pesq.pesq(fs = self.config.sample_rate, ref = clean_speech_val[i], deg = denoised_signal_inv[i], mode = 'wb')
+            pesq_score_nb = pesq.pesq(fs = self.config.sample_rate, ref = clean_speech_val[i], deg = denoised_signal_inv[i], mode = 'nb')
             pesq_dict['wb'].append(pesq_score_wb)
             pesq_dict['nb'].append(pesq_score_nb)
 
@@ -209,7 +211,7 @@ def load_Librispeech_data(dataset_dir, train = True):
     
     audio_data = []
 
-    for file in dataset_files[:50]:
+    for file in dataset_files:
         waveform, sample_rate = librosa.load(file, sr = None, mono = True)
         assert sample_rate == config.sample_rate, f"Sample rate mismatch. Expected {config.sample_rate} but got {sample_rate}."
 
@@ -263,11 +265,11 @@ if __name__ == "__main__":
     print("Sample noisy signal (first sample):", speech_enh.mel_spectrogram(noisy_speech_val[0])[0])
     print("Denoised signal (first sample):", denoised_signal[0])
 
-    # Visualize the mel spectrogram
-    speech_enh.visualize_spectrogram(clean_speech_val[:2], noisy_speech_val[:2])
-
     # Evaluate the denoised signal using PESQ
-    pesq_dict= speech_enh.evaluate()
+    pesq_dict= speech_enh.evaluate(clean_speech_val)
 
     print(f"PESQ score (wideband): {np.mean(pesq_dict['wb'])}")
     print(f"PESQ score (narrowband): {np.mean(pesq_dict['nb'])}")
+
+    # Visualize the mel spectrogram
+    speech_enh.visualize_spectrogram(clean_speech_val[:2], noisy_speech_val[:2])
