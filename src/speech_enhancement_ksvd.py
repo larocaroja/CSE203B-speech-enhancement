@@ -7,16 +7,11 @@ from sklearn.linear_model import Lasso
 from sklearn.decomposition import DictionaryLearning, NMF
 import librosa
 import librosa.display
-import time
-import warnings
-# warnings.filterwarnings("ignore")
-
-# import torch
-# import torchaudio
-# import torchaudio.transforms as T
-# import torchaudio.functional as F
+import matplotlib.pyplot as plt
+from collections import defaultdict
 
 import config
+import pesq
 
 
 class SpeechEnhancement:
@@ -105,7 +100,8 @@ class SpeechEnhancement:
         Denoise a signal using the learned dictionary D and Lasso for sparse coding.
         """
         noisy_signal = np.array([self.mel_spectrogram(waveform)[0].T for waveform in noisy_signal])
-        b, t,f = noisy_signal.shape
+        self.phase_noisy = np.array([self.mel_spectrogram(waveform)[1] for waveform in noisy_signal])
+        b, t, f = noisy_signal.shape
         noisy_signal = noisy_signal.reshape(f, -1)
         # print(noisy_signal.shape)
         # sparse_code = self.lasso_sparse_coding(self.D, noisy_signal, self.config.alpha_val)
@@ -115,9 +111,9 @@ class SpeechEnhancement:
                 sparse_code[:, i] = self.lasso_sparse_coding(self.D, noisy_signal[:, i], self.config.alpha_val)
         denoised_signal = np.dot(self.D, sparse_code)
         # print(denoised_signal.shape)
-        denoised_signal = denoised_signal.reshape(b, -1, f)
+        self.denoised_mel_spectrogram = denoised_signal.reshape(b, -1, f)
 
-        return denoised_signal
+        return self.denoised_mel_spectrogram
     
     def mel_spectrogram(self, waveform):
         """
@@ -125,7 +121,7 @@ class SpeechEnhancement:
         """
         stft = librosa.stft(waveform, n_fft=self.config.n_fft, hop_length=self.config.hop_size)
         mag, phase = librosa.magphase(stft)
-        mel_spectrogram = librosa.feature.melspectrogram(S=mag, sr=self.config.sample_rate, n_mels=self.config.n_mels, n_fft = self.config.n_fft, hop_length = self.config.hop_size)
+        mel_spectrogram = librosa.feature.melspectrogram(S=mag, sr=self.config.sample_rate, n_mels=self.config.n_mels)
         # print(mel_spectrogram)
         # log_mel_spectrogram = librosa.power_to_db(mel_spectrogram, ref=np.max)
 
@@ -135,11 +131,15 @@ class SpeechEnhancement:
         """
         Compute the inverse mel spectrogram of the waveform.
         """
-        # y_pad = librosa.util.fix_length(y, size=n + n_fft // 2)
-        # mel_spectrogram = librosa.db_to_power(log_mel_spectrogram)
-        stft = librosa.feature.inverse.mel_to_stft(mel_spectrogram, sr = self.config.sample_rate, n_fft=self.config.n_fft, power=2)
-        stft = stft * phase
+        # y_pad = librosa.util.fix_length(np.arange(int(self.config.duration * self.config.sample_rate)), size=n + n_fft // 2)
+        # print(mel_spectrogram.shape)
+        stft = librosa.feature.inverse.mel_to_stft(mel_spectrogram.T, sr = self.config.sample_rate, n_fft=self.config.n_fft, power=2)
+        # print(stft.shape, phase.shape)
+        stft = stft * phase[...,0].T
+        # print(stft.shape)
         waveform = librosa.istft(stft, hop_length=self.config.hop_size)
+        waveform = librosa.util.pad_center(waveform, size=int(self.config.duration * self.config.sample_rate), mode='constant')
+        # print(waveform.shape)
 
         return waveform
     
@@ -147,10 +147,55 @@ class SpeechEnhancement:
         """
         Learn the dictionary from clean speech signals.
         """
-        B = np.array([self.mel_spectrogram(waveform)[0].T for waveform in clean_speech]) # (n_samples, n_frames, n_mels)
+        self.clean_speech = clean_speech
+        B = np.array([self.mel_spectrogram(waveform)[0].T for waveform in self.clean_speech]) # (n_samples, n_frames, n_mels)
         B = B.reshape(B.shape[-1], -1) # (n_samples * n_frames, n_mels)
         self.D, X = self.k_svd(B) # (n_mels, n_atoms), (n_atoms, n_samples * n_frames)
         print(self.D)
+
+    def visualize_spectrogram(self, clean_speech, noisy_speech):
+        """
+        Visualize the mel spectrogram.
+        """
+        if len(clean_speech.shape) == 1 and len(noisy_speech.shape) == 1:
+            clean_speech = np.expand_dims(clean_speech, axis=0)
+            noisy_speech = np.expand_dims(noisy_speech, axis=0)
+
+        fig, axes = plt.subplots(len(clean_speech.shape), 3, figsize=(16, 8))
+        print(clean_speech.shape[0])
+        for i in range(clean_speech.shape[0]):
+            mel_spectrogram_clean, _ = self.mel_spectrogram(clean_speech[i])
+            mel_spectrogram_noisy, _ = self.mel_spectrogram(noisy_speech[i])
+            mel_spectrogram_denoised = self.denoise_signal([noisy_speech[i]])[0].T
+
+            librosa.display.specshow(librosa.power_to_db(mel_spectrogram_clean, ref=np.max), sr = self.config.sample_rate, n_fft = self.config.n_fft, hop_length = self.config.hop_size, y_axis='mel', x_axis='time', cmap = 'viridis', ax = axes[i,0])
+            librosa.display.specshow(librosa.power_to_db(mel_spectrogram_noisy, ref=np.max), sr = self.config.sample_rate, n_fft = self.config.n_fft, hop_length = self.config.hop_size, y_axis='mel', x_axis='time', cmap = 'viridis', ax = axes[i,1])
+            librosa.display.specshow(librosa.power_to_db(mel_spectrogram_denoised, ref=np.max), sr = self.config.sample_rate, n_fft = self.config.n_fft, hop_length = self.config.hop_size, y_axis='mel', x_axis='time', cmap = 'viridis', ax = axes[i,2])
+
+        axes[0,0].set_title('Clean signal')
+        axes[0,1].set_title('Noisy signal')
+        axes[0,2].set_title('Denoised signal')
+
+        plt.tight_layout()
+        plt.savefig('mel_spectrogram.png')
+        plt.show()
+
+    def evaluate(self):
+        """
+        Evaluate the denoised signal using PESQ.
+        """
+        # print(self.denoised_mel_spectrogram.shape, self.phase_noisy.shape)
+        denoised_signal_inv = np.array([self.inverse_mel_spectrogram(mel_spectrogram, phase) for mel_spectrogram, phase in zip(self.denoised_mel_spectrogram, self.phase_noisy)])
+        # print(self.clean_speech.shape, denoised_signal_inv.shape)
+        pesq_dict = defaultdict(list)    
+
+        for i in range(len(self.clean_speech)):
+            pesq_score_wb = pesq.pesq(fs = self.config.sample_rate, ref = self.clean_speech[i], deg = denoised_signal_inv[i], mode = 'wb')
+            pesq_score_nb = pesq.pesq(fs = self.config.sample_rate, ref = self.clean_speech[i], deg = denoised_signal_inv[i], mode = 'nb')
+            pesq_dict['wb'].append(pesq_score_wb)
+            pesq_dict['nb'].append(pesq_score_nb)
+
+        return pesq_dict
 
 
 def load_Librispeech_data(dataset_dir, train = True):
@@ -217,3 +262,12 @@ if __name__ == "__main__":
     print("Sample clean signal (first sample):", speech_enh.mel_spectrogram(clean_speech_val[0])[0])
     print("Sample noisy signal (first sample):", speech_enh.mel_spectrogram(noisy_speech_val[0])[0])
     print("Denoised signal (first sample):", denoised_signal[0])
+
+    # Visualize the mel spectrogram
+    # speech_enh.visualize_spectrogram(clean_speech_val[:2], noisy_speech_val[:2])
+
+    # Evaluate the denoised signal using PESQ
+    pesq_dict= speech_enh.evaluate()
+
+    print(f"PESQ score (wideband): {np.mean(pesq_dict['wb'])}")
+    print(f"PESQ score (narrowband): {np.mean(pesq_dict['nb'])}")
