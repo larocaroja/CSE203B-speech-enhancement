@@ -100,16 +100,16 @@ class SpeechEnhancement:
         """
         Denoise a signal using the learned dictionary D and Lasso for sparse coding.
         """
-        noisy_signal = np.array([self.mel_spectrogram(waveform)[0].T for waveform in noisy_signal])
+        noisy_mel_spectrogram = np.array([self.mel_spectrogram(waveform)[0].T for waveform in noisy_signal])
         self.phase_noisy = np.array([self.mel_spectrogram(waveform)[1] for waveform in noisy_signal])
-        b, t, f = noisy_signal.shape
-        noisy_signal = noisy_signal.reshape(f, -1)
+        b, t, f = noisy_mel_spectrogram.shape
+        noisy_mel_spectrogram = noisy_mel_spectrogram.reshape(f, -1)
         # print(noisy_signal.shape)
         # sparse_code = self.lasso_sparse_coding(self.D, noisy_signal, self.config.alpha_val)
         # denoised_signal = np.zeros(noisy_signal.shape)
-        sparse_code = np.zeros((self.config.n_atoms, noisy_signal.shape[-1]))
+        sparse_code = np.zeros((self.config.n_atoms, noisy_mel_spectrogram.shape[-1]))
         for i in range(sparse_code.shape[-1]):
-                sparse_code[:, i] = self.lasso_sparse_coding(self.D, noisy_signal[:, i], self.config.alpha_val)
+                sparse_code[:, i] = self.lasso_sparse_coding(self.D, noisy_mel_spectrogram[:, i], self.config.alpha_val)
         denoised_signal = np.dot(self.D, sparse_code)
         # print(denoised_signal.shape)
         self.denoised_mel_spectrogram = denoised_signal.reshape(b, -1, f)
@@ -177,7 +177,7 @@ class SpeechEnhancement:
         axes[0,2].set_title('Denoised signal')
 
         plt.tight_layout()
-        plt.savefig('mel_spectrogram.png')
+        plt.savefig(f'mel_spectrogram_{self.config.num_ksvd_iterations}_{self.config.noise_type}_{self.config.SNR_dB}.png')
         plt.show()
 
     def evaluate(self, clean_speech_val):
