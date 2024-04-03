@@ -1,7 +1,7 @@
 # NMF-based Speech Enhancement for WI24 CSE 203B
 
 ## Introduction
-This project paper sets out to tackle the challenge of speech enhancement by leveraging the principles of dictionary learn- ing and lasso sparse coding, a method rooted in convex optimization, to systematically decompose and reconstruct audio signals for clearer and more intelligible speech output.
+This project paper sets out to tackle the challenge of speech enhancement by leveraging the principles of dictionary learning and lasso sparse coding, a method rooted in convex optimization, to systematically decompose and reconstruct audio signals for clearer and more intelligible speech output.
 
 ## Speech Enhancement Result on LibriSpeech
 ![enhancement result with white noise](imgs/mel_spectrogram_256_0.001_white_10.png)
